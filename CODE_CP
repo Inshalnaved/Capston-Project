@@ -1,0 +1,175 @@
+import numpy as np
+from keras.models import Sequential
+from keras.layers import Dense, Conv1D, Flatten, Dropout
+from keras.optimizers import Adam
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.datasets import make_classification
+
+# --- Step 1: Load and Preprocess Data ---
+def load_crime_data():
+    """
+    Generate synthetic crime data for binary classification.
+    Replace with real data loading logic as needed.
+    """
+    X, y = make_classification(n_samples=1000, n_features=10, n_classes=2, random_state=42)
+    X = X.reshape((X.shape[0], X.shape[1], 1))  # Reshape for CNN compatibility
+    return train_test_split(X, y, test_size=0.2, random_state=42)
+
+X_train, X_test, y_train, y_test = load_crime_data()
+
+# --- Step 2: Define CNN Model ---
+def create_cnn(input_shape, learning_rate, dropout_rate):
+    """
+    Create a CNN model with configurable parameters.
+    
+    Steps:
+    1. Input Layer: Conv1D for extracting spatial features.
+    2. Flatten: Flatten the output for fully connected layers.
+    3. Dropout: Regularization to prevent overfitting.
+    4. Dense Layers: Fully connected layers for classification.
+    5. Output Layer: Sigmoid activation for binary classification.
+    """
+    model = Sequential([
+        Conv1D(32, kernel_size=3, activation='relu', input_shape=input_shape),
+        Flatten(),
+        Dropout(dropout_rate),
+        Dense(64, activation='relu'),
+        Dense(1, activation='sigmoid')  # Sigmoid for binary classification
+    ])
+    model.compile(optimizer=Adam(learning_rate=learning_rate),  # Optimizer
+                  loss='binary_crossentropy',  # Loss function
+                  metrics=['accuracy'])  # Performance metric
+    return model
+
+# --- Step 3: Define Objective Function for Hyperparameter Evaluation ---
+def evaluate_cnn(params):
+    """
+    Train and evaluate the CNN using the provided hyperparameters.
+    
+    Hyperparameters:
+    1. Learning Rate: Controls the step size in weight updates.
+    2. Dropout Rate: Probability of dropping out neurons during training.
+    3. Batch Size: Number of samples used for gradient computation.
+    
+    Returns:
+    Error (1 - accuracy) as the objective for minimization.
+    """
+    learning_rate, dropout_rate, batch_size = params
+    model = create_cnn((X_train.shape[1], X_train.shape[2]), learning_rate, dropout_rate)
+    model.fit(X_train, y_train, epochs=5, batch_size=int(batch_size), verbose=0)  # Training
+    predictions = (model.predict(X_test) > 0.5).astype(int)  # Prediction
+    return 1 - accuracy_score(y_test, predictions)  # Error = 1 - accuracy
+
+# --- Step 4: Particle Swarm Optimization (PSO) ---
+def pso(num_particles, num_dimensions, lb, ub, iterations):
+    """
+    Optimize CNN hyperparameters using Particle Swarm Optimization (PSO).
+    
+    Steps:
+    1. Initialize particles with random positions and velocities.
+    2. Evaluate fitness of particles using the CNN objective function.
+    3. Update velocities and positions based on personal and global bests.
+    4. Return the best hyperparameters and corresponding score.
+    """
+    particles = np.random.uniform(low=lb, high=ub, size=(num_particles, num_dimensions))
+    velocities = np.random.uniform(-1, 1, (num_particles, num_dimensions))
+    personal_best = particles.copy()
+    personal_best_scores = np.array([evaluate_cnn(p) for p in particles])
+    global_best = personal_best[np.argmin(personal_best_scores)]
+    global_best_score = min(personal_best_scores)
+    
+    for t in range(iterations):
+        for i in range(num_particles):
+            r1, r2 = np.random.rand(), np.random.rand()
+            velocities[i] = (0.7 * velocities[i] +
+                             2.0 * r1 * (personal_best[i] - particles[i]) +
+                             2.0 * r2 * (global_best - particles[i]))
+            
+            particles[i] += velocities[i]
+            particles[i] = np.clip(particles[i], lb, ub)
+            
+            fitness = evaluate_cnn(particles[i])
+            if fitness < personal_best_scores[i]:
+                personal_best[i] = particles[i]
+                personal_best_scores[i] = fitness
+                
+            if fitness < global_best_score:
+                global_best = particles[i]
+                global_best_score = fitness
+        
+        print(f"PSO Iteration {t+1}: Best Score = {global_best_score}")
+    
+    return global_best, global_best_score
+
+# --- Step 5: Grey Wolf Optimization (GWO) ---
+def gwo(num_wolves, num_dimensions, lb, ub, iterations):
+    """
+    Optimize CNN hyperparameters using Grey Wolf Optimization (GWO).
+    
+    Steps:
+    1. Initialize wolves with random positions.
+    2. Evaluate fitness of wolves using the CNN objective function.
+    3. Update positions based on alpha, beta, and delta wolves.
+    4. Return the best hyperparameters and corresponding score.
+    """
+    wolves = np.random.uniform(low=lb, high=ub, size=(num_wolves, num_dimensions))
+    fitness = np.array([evaluate_cnn(w) for w in wolves])
+    sorted_indices = np.argsort(fitness)
+    alpha, beta, delta = wolves[sorted_indices[:3]]
+    
+    for t in range(iterations):
+        a = 2 - t * (2 / iterations)
+        for i in range(num_wolves):
+            r1, r2 = np.random.rand(), np.random.rand()
+            A1, C1 = 2 * a * r1 - a, 2 * r2
+            D_alpha = abs(C1 * alpha - wolves[i])
+            X1 = alpha - A1 * D_alpha
+
+            r1, r2 = np.random.rand(), np.random.rand()
+            A2, C2 = 2 * a * r1 - a, 2 * r2
+            D_beta = abs(C2 * beta - wolves[i])
+            X2 = beta - A2 * D_beta
+
+            r1, r2 = np.random.rand(), np.random.rand()
+            A3, C3 = 2 * a * r1 - a, 2 * r2
+            D_delta = abs(C3 * delta - wolves[i])
+            X3 = delta - A3 * D_delta
+
+            wolves[i] = np.clip((X1 + X2 + X3) / 3, lb, ub)
+        
+        fitness = np.array([evaluate_cnn(w) for w in wolves])
+        sorted_indices = np.argsort(fitness)
+        alpha, beta, delta = wolves[sorted_indices[:3]]
+        
+        print(f"GWO Iteration {t+1}: Alpha Score = {fitness[sorted_indices[0]]}")
+    
+    return alpha, fitness[sorted_indices[0]]
+
+# --- Main Optimization Process ---
+if __name__ == "__main__":
+    # Define parameter bounds [learning_rate, dropout_rate, batch_size]
+    lb = [0.0001, 0.1, 16]  # Lower bounds
+    ub = [0.01, 0.5, 128]  # Upper bounds
+    num_dimensions = 3  # Hyperparameters: learning_rate, dropout_rate, batch_size
+    
+    print("Running PSO...")
+    best_pso_params, best_pso_score = pso(num_particles=10, num_dimensions=num_dimensions, lb=lb, ub=ub, iterations=10)
+    print(f"PSO Best Parameters: {best_pso_params}, Best Score: {best_pso_score}")
+    
+    print("\nRunning GWO...")
+    best_gwo_params, best_gwo_score = gwo(num_wolves=10, num_dimensions=num_dimensions, lb=lb, ub=ub, iterations=10)
+    print(f"GWO Best Parameters: {best_gwo_params}, Best Score: {best_gwo_score}")
+________________________________________
+Step-by-Step CNN Components Integrated:
+1.	Input Layer (Conv1D): Extracts spatial patterns from the crime data.
+2.	Flatten Layer: Converts multi-dimensional output into a 1D vector for dense layers.
+3.	Dropout Layer: Reduces overfitting by randomly disabling neurons.
+4.	Dense Layers: Maps features to the binary crime prediction output.
+5.	Compilation: Uses the Adam optimizer with a custom learning rate and binary cross-entropy loss.
+________________________________________
+Output:
+The code runs both PSO and GWO, and outputs:
+•	Optimized Hyperparameters: Learning rate, dropout rate, batch size.
+•	Best Score: Error metric minimized by each algorithm.
+Let me know if you'd like further refinements!
